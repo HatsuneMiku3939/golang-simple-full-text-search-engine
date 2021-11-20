@@ -145,3 +145,116 @@ func stemmerFilter(tokens []string) []string {
     return r
 }
 ```
+
+## Indexing documents
+
+Building the index consists of analyzing the documents and adding their IDs to the map:
+
+
+`pkg/search/index.go`
+
+```go
+type Index map[string][]int
+
+func (idx index) add(docs []document) {
+    for _, doc := range docs {
+        for _, token := range analyze(doc.Text) {
+            ids := idx[token]
+            if ids != nil && ids[len(ids)-1] == doc.ID {
+                // Don't add same ID twice.
+                continue
+            }
+            idx[token] = append(ids, doc.ID)
+        }
+    }
+}
+
+func example() {
+    idx := make(Index)
+    idx.add([]document{{ID: 1, Text: "A donut on a glass plate. Only the donuts."}})
+    idx.add([]document{{ID: 2, Text: "donut is a donut"}})
+    fmt.Println(idx)
+}
+```
+
+## Querying the index
+
+To query the index, we are going to apply the same tokenizer and filters we used for indexing:
+
+`pkg/search/index.go`
+
+```go
+func (idx Index) Search(text string) [][]int {
+    var r [][]int
+    for _, token := range analyze(text) {
+        if ids, ok := idx[token]; ok {
+            r = append(r, ids)
+        }
+    }
+    return r
+}
+
+func example() {
+	idx.search("Small wild cat")
+	// [[24, 173, 303, ...], [98, 173, 765, ...], [[24, 51, 173, ...]]
+}
+```
+
+And finally, we can find all documents that mention cats. Searching 600K documents took less than a millisecond!
+
+With the inverted index, the time complexity of the search query is linear to the number of search tokens.
+In the example query above, other than analyzing the input text, search had to perform only three map lookups.
+
+## Boolen Querying
+
+The query from the previous section returned a disjoined list of documents for each token. What we normally expect
+to find when we type small wild cat in a search box is a list of results that contain small, wild and cat at the same time.
+The next step is to compute the set intersection between the lists. This way we'll get a list of documents matching all tokens.
+
+Luckily, IDs in our inverted index are inserted in ascending order. Since the IDs are sorted,
+it's possible to compute the intersection between two lists in linear time.
+The intersection function iterates two lists simultaneously and collect IDs that exist in both:
+
+```go
+func intersection(a []int, b []int) []int {
+    maxLen := len(a)
+    if len(b) > maxLen {
+        maxLen = len(b)
+    }
+    r := make([]int, 0, maxLen)
+    var i, j int
+    for i < len(a) && j < len(b) {
+        if a[i] < b[j] {
+            i++
+        } else if a[i] > b[j] {
+            j++
+        } else {
+            r = append(r, a[i])
+            i++
+            j++
+        }
+    }
+    return r
+}
+```
+
+Updated search analyzes the given query text, lookups tokens and computes the set intersection between lists of IDs:
+
+```go
+func (idx index) Search(text string) []int {
+    var r []int
+    for _, token := range analyze(text) {
+        if ids, ok := idx[token]; ok {
+            if r == nil {
+                r = ids
+            } else {
+                r = intersection(r, ids)
+            }
+        } else {
+            // Token doesn't exist.
+            return nil
+        }
+    }
+    return r
+}
+```
