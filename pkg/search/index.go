@@ -1,7 +1,7 @@
 package search
 
 import (
-	"fts/pkg/wikipedia/dump"
+	"fts/pkg/wikipedia"
 )
 
 // Index is the implementation of a search index.
@@ -13,7 +13,7 @@ func New() Index {
 }
 
 // Add adds the given documents to the index
-func (idx Index) Add(docs ...dump.Document) {
+func (idx Index) Add(docs ...wikipedia.Document) {
 	for _, doc := range docs {
 		for _, token := range Analyze(doc.Text) {
 			ids := idx[token]
